@@ -91,7 +91,7 @@ app.get("/unsubscribe/:email", async (req, res) => {
 });
 
 // Server start
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 8080;
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("Tracking server running on port " + PORT);
