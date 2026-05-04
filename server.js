@@ -1,14 +1,14 @@
-﻿const express = require("express");
+const express = require("express");
 const { createClient } = require("@supabase/supabase-js");
 const log = require("electron-log");
 
 const app = express();
 app.use(express.json());
 
-// Supabase connect
+// Supabase connect (আপনার দেওয়া সঠিক Anon Public Key বসানো হয়েছে)
 const supabase = createClient(
   "https://jguvvzxwuaomwxqpyzpg.supabase.co",
-  "sb_publishable_i01ES9A6ouu3iMsJutMwpQ_QHWNShux"
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpndXZ2enh3dWFvbXd4cXB5enBnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NTk3MjcsImV4cCI6MjA5MzQzNTcyN30.cnWMggvj3O37x_EgXJZJXPT4oP37zxlxqWTfT7afnuU"
 );
 
 // 1x1 pixel
