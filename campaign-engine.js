@@ -1,4 +1,4 @@
-﻿const { getGmailClient } = require("./auth");
+const { getGmailClient } = require("./auth");
 const { v4: uuidv4 } = require("uuid");
 const log = require("electron-log");
 const { BrowserWindow } = require("electron");
@@ -70,7 +70,6 @@ async function startCampaignEngine(campaignId) {
     if (contacts.length === 0) throw new Error("পাঠানোর মতো কোনো কন্টাক্ট পাওয়া যায়নি।");
 
     // ৩. ক্যাম্পেইন-ভিত্তিক ফিল্টার (স্মার্ট ফলো-আপ লজিক)
-    // এটি শুধু চেক করবে এই নির্দিষ্ট ক্যাম্পেইনে আগে মেইল গেছে কি না
     const { data: sentData } = await supabase
       .from("campaign_logs")
       .select("email")
@@ -101,12 +100,19 @@ async function startCampaignEngine(campaignId) {
     const tokens = typeof account.tokens === "string" ? JSON.parse(account.tokens) : account.tokens;
     gmail = await getGmailClient({ ...account, tokens });
 
+    // ── 100% FIXED SEND LOOP ───────────────────────────────────────────
     const sendLoop = async () => {
       let currentSentCount = alreadySentInThisCampaign.size;
+      let finalStatus = "completed"; // ডিফল্ট স্ট্যাটাস completed
 
       for (let i = 0; i < toSend.length; i++) {
         const state = activeCampaigns.get(campaignId);
-        if (!state || !state.running) break;
+        
+        // ইউজার নিজে থেকে Pause করলে স্ট্যাটাস paused হবে
+        if (!state || !state.running) {
+          finalStatus = "paused";
+          break;
+        }
 
         const contact = toSend[i];
         const trackingId = uuidv4();
@@ -154,14 +160,23 @@ async function startCampaignEngine(campaignId) {
         } catch (err) {
           log.error(`ইমেইল ব্যর্থ:`, err.message);
           await logToDb("error", `Failed to send to ${contact.email}: ${err.message}`, campaignId);
-          if (err.message.includes("Rate limit") || err.message.includes("quota")) break; 
-          await sleep(5000);
+          
+          // 🚨 BUG FIX: Rate limit বা Quota শেষ হলে ক্যাম্পেইন Completed না হয়ে Paused হবে
+          const errMsg = err.message.toLowerCase();
+          if (errMsg.includes("rate limit") || errMsg.includes("quota") || errMsg.includes("limit exceeded")) {
+            finalStatus = "paused"; 
+            await logToDb("error", `[CRITICAL] Gmail Daily Limit Reached. Campaign auto-paused.`, campaignId);
+            break; 
+          }
+          await sleep(5000); // সাধারণ এররের জন্য ৫ সেকেন্ড অপেক্ষা করে পরেরটাতে যাবে
         }
       }
       
       activeCampaigns.delete(campaignId);
-      await supabase.from("campaigns").update({ status: "completed" }).eq("id", campaignId);
-      sendProgress(campaignId, { status: "completed", sent: currentSentCount, total: contacts.length });
+      
+      // ডাইনামিক স্ট্যাটাস আপডেট (হয় completed, নয়তো paused)
+      await supabase.from("campaigns").update({ status: finalStatus }).eq("id", campaignId);
+      sendProgress(campaignId, { status: finalStatus, sent: currentSentCount, total: contacts.length });
     };
 
     sendLoop();
@@ -177,7 +192,7 @@ function pauseCampaignEngine(campaignId) {
   if (state) state.running = false;
 }
 
-// ৪. পার্সোনালাইজেশন ভেরিয়েবল আপডেট (সবগুলো ভেরিয়েবল সাপোর্ট করবে)
+// ৪. পার্সোনালাইজেশন ভেরিয়েবল আপডেট
 function personalize(text, contact) {
   if (!text) return "";
   return text
