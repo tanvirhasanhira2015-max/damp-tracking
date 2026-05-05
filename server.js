@@ -3,55 +3,76 @@ const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
 
-// Supabase connect
+// Supabase connect (Service Role Secret Key)
 const supabaseUrl = "https://jguvvzxwuaomwxqpyzpg.supabase.co";
 const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpndXZ2enh3dWFvbXd4cXB5enBnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3Nzg1OTcyNywiZXhwIjoyMDkzNDM1NzI3fQ.RtU0yF8KlMVuk_Z_Rturbkc77vSFXr0yxg4F6fxPEL8"; 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// 1x1 Invisible Pixel
+// 1x1 Invisible Pixel (অদৃশ্য পিক্সেল)
 const PIXEL = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
 
 // Final Open Tracking Route
 app.get("/track/open/:trackingId", async (req, res) => {
   const trackingId = req.params.trackingId.trim();
+  const userAgent = req.headers["user-agent"] || "";
+
+  // ক্লায়েন্টকে আগে রেসপন্স পাঠিয়ে দেওয়া হচ্ছে যাতে ইউজারের ইমেইল লোড হতে দেরি না হয়
+  res.set("Content-Type", "image/gif");
+  res.set("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.send(PIXEL);
+
+  // 🚨 Bot / Google Image Proxy Filtering
+  // রিকোয়েস্টটি গুগল বট বা স্ক্যানার থেকে আসলে, এটি ডাটাবেসে কাউন্ট হবে না
+  const isBot = /bot|googleimageproxy|crawler|spider|slurp/i.test(userAgent);
+  if (isBot) {
+    console.log("Bot detected, tracking skipped for:", trackingId);
+    return;
+  }
 
   try {
-    // ১. প্রথমে লগের স্ট্যাটাস 'opened' হিসেবে আপডেট করা
-    const { data: updatedLogs, error: logError } = await supabase
+    // ১. আগে চেক করা এই মেইলটি অলরেডি 'opened' আছে কি না (Duplicate Open Protection)
+    const { data: existingLog } = await supabase
       .from("campaign_logs")
-      .update({
-        status: "opened",
-        opened_at: new Date().toISOString(),
-      })
+      .select("status, campaign_id")
       .eq("tracking_id", trackingId)
-      .select("campaign_id");
+      .single();
 
-    // ২. যদি লগ আপডেট সফল হয়, তবে মেইন ক্যাম্পেইন টেবিলের কাউন্টার বাড়ানো
-    if (!logError && updatedLogs && updatedLogs.length > 0) {
-      const campaignId = updatedLogs[0].campaign_id;
+    // যদি আগে থেকেই opened না থাকে, তবেই আমরা আপডেট করব
+    if (existingLog && existingLog.status !== "opened") {
       
-      // ক্যাম্পেইনের বর্তমান 'total_opened' সংখ্যা কত তা জানা (সংশোধিত নাম)
-      const { data: campData } = await supabase
-        .from("campaigns")
-        .select("total_opened") 
-        .eq("id", campaignId)
-        .single();
-      
-      const newCount = (campData?.total_opened || 0) + 1;
+      // লগের স্ট্যাটাস 'opened' হিসেবে আপডেট করা
+      const { error: logError } = await supabase
+        .from("campaign_logs")
+        .update({
+          status: "opened",
+          opened_at: new Date().toISOString(),
+        })
+        .eq("tracking_id", trackingId);
 
-      // সঠিক কলামে নতুন সংখ্যাটি আপডেট করে দেওয়া
-      await supabase
-        .from("campaigns")
-        .update({ total_opened: newCount }) 
-        .eq("id", campaignId);
+      // লগ আপডেট সফল হলে মেইন ক্যাম্পেইন টেবিলের কাউন্টার বাড়ানো
+      if (!logError && existingLog.campaign_id) {
+        const campaignId = existingLog.campaign_id;
+        
+        // ক্যাম্পেইনের বর্তমান ওপেন সংখ্যা কত তা জানা
+        const { data: campData } = await supabase
+          .from("campaigns")
+          .select("total_opened, opens_count") 
+          .eq("id", campaignId)
+          .single();
+        
+        // নতুন সংখ্যাটি আপডেট করে দেওয়া
+        const currentCount = campData?.total_opened || campData?.opens_count || 0;
+        const newCount = currentCount + 1;
+
+        await supabase
+          .from("campaigns")
+          .update({ total_opened: newCount, opens_count: newCount }) 
+          .eq("id", campaignId);
+      }
     }
   } catch (err) {
     console.error("Database Update Error:", err.message);
   }
-
-  res.set("Content-Type", "image/gif");
-  res.set("Cache-Control", "no-cache, no-store, must-revalidate");
-  res.send(PIXEL);
 });
 
 // Railway এর পোর্টে রান করা
