@@ -11,7 +11,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 // 1x1 Invisible Pixel (অদৃশ্য পিক্সেল)
 const PIXEL = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
 
-// Final Open Tracking Route
+// ── 1. OPEN TRACKING ROUTE ──────────────────────────────
 app.get("/track/open/:trackingId", async (req, res) => {
   const trackingId = req.params.trackingId.trim();
   const userAgent = req.headers["user-agent"] || "";
@@ -72,6 +72,41 @@ app.get("/track/open/:trackingId", async (req, res) => {
     }
   } catch (err) {
     console.error("Database Update Error:", err.message);
+  }
+});
+
+// ── 2. UNSUBSCRIBE ROUTE (Missing fix) ──────────────────
+app.get("/unsubscribe/:email", async (req, res) => {
+  const email = decodeURIComponent(req.params.email).trim().toLowerCase();
+
+  try {
+    // Suppression list e add kora
+    const { error: supError } = await supabase
+      .from("suppression_list")
+      .upsert({ email: email, reason: "user unsubscribed" });
+
+    if (supError) throw supError;
+
+    // Contacts table e status 'suppressed' kora
+    await supabase
+      .from("contacts")
+      .update({ status: "suppressed" })
+      .eq("email", email);
+
+    // User ke success message dekhano
+    res.status(200).send(`
+      <html>
+        <body style="font-family:sans-serif;text-align:center;padding:50px;background:#f9fafb;color:#111827;">
+          <div style="max-width:500px;margin:0 auto;background:white;padding:30px;border-radius:10px;box-shadow:0 4px 6px rgba(0,0,0,0.1);">
+            <h2 style="color:#dc2626;">Unsubscribed Successfully</h2>
+            <p>You have been removed from our mailing list and will no longer receive emails from us.</p>
+          </div>
+        </body>
+      </html>
+    `);
+  } catch (err) {
+    console.error("Unsubscribe Error:", err.message);
+    res.status(500).send("An error occurred. Please try again.");
   }
 });
 
