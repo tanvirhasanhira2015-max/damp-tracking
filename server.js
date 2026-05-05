@@ -11,7 +11,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 // 1x1 Invisible Pixel (অদৃশ্য পিক্সেল)
 const PIXEL = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
 
-// ── 1. OPEN TRACKING ROUTE ──────────────────────────────
+// ── 1. OPEN TRACKING ROUTE (SMART TIME-BASED FILTER) ─────
 app.get("/track/open/:trackingId", async (req, res) => {
   const trackingId = req.params.trackingId.trim();
   const userAgent = req.headers["user-agent"] || "";
@@ -21,26 +21,42 @@ app.get("/track/open/:trackingId", async (req, res) => {
   res.set("Cache-Control", "no-cache, no-store, must-revalidate");
   res.send(PIXEL);
 
-  // 🚨 Bot / Google Image Proxy Filtering
-  // রিকোয়েস্টটি গুগল বট বা স্ক্যানার থেকে আসলে, এটি ডাটাবেসে কাউন্ট হবে না
-  const isBot = /bot|googleimageproxy|crawler|spider|slurp/i.test(userAgent);
-  if (isBot) {
-    console.log("Bot detected, tracking skipped for:", trackingId);
+  // 🚨 Strict Bot Filtering
+  // গুগল ইমেজ প্রক্সিকে সরাসরি ব্লক করা যাবে না, কারণ জিমেইল ইউজাররাও এটি ব্যবহার করে।
+  // আমরা শুধু অন্যান্য স্পষ্ট স্প্যাম বটগুলোকে ব্লক করব।
+  const isStrictBot = /bot(?!googleimage)|crawler|spider|slurp/i.test(userAgent);
+  if (isStrictBot) {
+    console.log("Strict bot detected, skipped:", trackingId);
     return;
   }
 
   try {
-    // ১. আগে চেক করা এই মেইলটি অলরেডি 'opened' আছে কি না (Duplicate Open Protection)
+    // ডাটাবেস থেকে লগের স্ট্যাটাস এবং 'sent_at' (মেইল পাঠানোর সময়) আনা হলো
     const { data: existingLog } = await supabase
       .from("campaign_logs")
-      .select("status, campaign_id")
+      .select("status, campaign_id, sent_at")
       .eq("tracking_id", trackingId)
       .single();
 
-    // যদি আগে থেকেই opened না থাকে, তবেই আমরা আপডেট করব
+    // যদি আগে থেকেই opened না থাকে, তবেই আমরা লজিক চালাব
     if (existingLog && existingLog.status !== "opened") {
       
-      // লগের স্ট্যাটাস 'opened' হিসেবে আপডেট করা
+      // 🚨 Smart Time-Based Bot Filter
+      const isGoogleProxy = /googleimageproxy/i.test(userAgent);
+
+      if (isGoogleProxy && existingLog.sent_at) {
+        const sentTime = new Date(existingLog.sent_at).getTime();
+        const nowTime = new Date().getTime();
+        const diffInSeconds = (nowTime - sentTime) / 1000;
+
+        // মেইল পাঠানোর ১৫ সেকেন্ডের মধ্যে গুগল স্ক্যান করলে সেটি ফেক ওপেন (বট)
+        if (diffInSeconds < 15) {
+          console.log("Ignored auto-prefetch by Google bot for:", trackingId);
+          return; // কাউন্ট না করে বের হয়ে যাবে
+        }
+      }
+
+      // আসল ওপেন হিসেবে ডাটাবেস আপডেট করা (স্ট্যাটাস 'opened' করা)
       const { error: logError } = await supabase
         .from("campaign_logs")
         .update({
@@ -53,14 +69,12 @@ app.get("/track/open/:trackingId", async (req, res) => {
       if (!logError && existingLog.campaign_id) {
         const campaignId = existingLog.campaign_id;
         
-        // ক্যাম্পেইনের বর্তমান ওপেন সংখ্যা কত তা জানা
         const { data: campData } = await supabase
           .from("campaigns")
           .select("total_opened, opens_count") 
           .eq("id", campaignId)
           .single();
         
-        // নতুন সংখ্যাটি আপডেট করে দেওয়া
         const currentCount = campData?.total_opened || campData?.opens_count || 0;
         const newCount = currentCount + 1;
 
@@ -75,7 +89,7 @@ app.get("/track/open/:trackingId", async (req, res) => {
   }
 });
 
-// ── 2. UNSUBSCRIBE ROUTE (Missing fix) ──────────────────
+// ── 2. UNSUBSCRIBE ROUTE ─────────────────────────────────
 app.get("/unsubscribe/:email", async (req, res) => {
   const email = decodeURIComponent(req.params.email).trim().toLowerCase();
 
