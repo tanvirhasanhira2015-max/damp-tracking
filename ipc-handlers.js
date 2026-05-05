@@ -73,7 +73,8 @@ ipcMain.handle("open-auth-window", async () => {
       width: 500, height: 650, title: "Sign in with Google",
       webPreferences: {
         nodeIntegration: false, contextIsolation: true,
-        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        // 🚨 FIXED: Google Login error bypass korar jonno ekdom latest Chrome 147 kora hoyeche
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
       },
     });
     authWindow.loadURL(authUrl);
@@ -229,7 +230,7 @@ ipcMain.handle("pause-campaign", async (_, id) => {
   return { success: true };
 });
 
-// ── TEMPLATES (100% FIXED ERROR HANDLING & NO UPDATED_AT) ─────
+// ── TEMPLATES ─────────────────────────────────────────────────
 ipcMain.handle("save-template", async (_, data) => {
   try {
     const id = data.id || uuidv4();
