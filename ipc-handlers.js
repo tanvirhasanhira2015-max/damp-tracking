@@ -12,7 +12,7 @@ const log = require("electron-log");
 const http = require("http");
 const { google } = require("googleapis");
 
-// ১. সুপাবেস কানেকশন (Main-এর সাথে মিল রেখে Service Role Key ব্যবহার করা হয়েছে)
+// ১. সুপাবেস কানেকশন (Service Role Key)
 const supabase = createClient(
   "https://jguvvzxwuaomwxqpyzpg.supabase.co",
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpndXZ2enh3dWFvbXd4cXB5enBnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3Nzg1OTcyNywiZXhwIjoyMDkzNDM1NzI3fQ.RtU0yF8KlMVuk_Z_Rturbkc77vSFXr0yxg4F6fxPEL8"
@@ -185,7 +185,7 @@ ipcMain.handle("create-campaign", async (_, data) => {
       account_id: data.accountId, status: "draft",
       audience_filter: JSON.stringify(data.audienceFilter || {}),
       daily_limit: data.dailyLimit || 100,
-      created_at: new Date().toISOString() // টাইমজোন ফিক্স করার জন্য যোগ করা হয়েছে
+      created_at: new Date().toISOString()
     });
     if (error) throw new Error(error.message);
     return { success: true, id };
@@ -229,18 +229,28 @@ ipcMain.handle("pause-campaign", async (_, id) => {
   return { success: true };
 });
 
-// ── TEMPLATES ─────────────────────────────────────────────────
+// ── TEMPLATES (100% FIXED ERROR HANDLING & NO UPDATED_AT) ─────
 ipcMain.handle("save-template", async (_, data) => {
-  const id = data.id || uuidv4();
-  const now = new Date().toISOString(); // Pending ফিক্স করার জন্য সময় আনা হলো
-  
-  if (data.id) {
-    await supabase.from("templates").update({ name: data.name, subject: data.subject, body: data.body, updated_at: now }).eq("id", id);
-  } else {
-    // নতুন টেমপ্লেট তৈরির সময় created_at এবং updated_at দুটোই পাঠানো হচ্ছে
-    await supabase.from("templates").insert({ id, name: data.name, subject: data.subject, body: data.body, created_at: now, updated_at: now });
+  try {
+    const id = data.id || uuidv4();
+    let response;
+    
+    if (data.id) {
+      response = await supabase.from("templates")
+        .update({ name: data.name, subject: data.subject, body: data.body })
+        .eq("id", id);
+    } else {
+      response = await supabase.from("templates")
+        .insert({ id, name: data.name, subject: data.subject, body: data.body });
+    }
+
+    if (response.error) throw new Error(response.error.message);
+    
+    return { success: true, id };
+  } catch (err) {
+    log.error("Template Save Error:", err.message);
+    return { success: false, error: err.message };
   }
-  return { success: true, id };
 });
 
 ipcMain.handle("get-templates", async () => {
