@@ -11,52 +11,48 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 // 1x1 Invisible Pixel (অদৃশ্য পিক্সেল)
 const PIXEL = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
 
-// ── 1. OPEN TRACKING ROUTE (SMART TIME-BASED FILTER) ─────
+// ── 1. OPEN TRACKING ROUTE (100% SECURE & SYNCED) ─────────
 app.get("/track/open/:trackingId", async (req, res) => {
   const trackingId = req.params.trackingId.trim();
-  const userAgent = req.headers["user-agent"] || "";
+  const userAgent = (req.headers["user-agent"] || "").toLowerCase();
 
-  // ক্লায়েন্টকে আগে রেসপন্স পাঠিয়ে দেওয়া হচ্ছে যাতে ইউজারের ইমেইল লোড হতে দেরি না হয়
+  // ১. ইউজারকে সাথে সাথে পিক্সেল রিটার্ন করা (যাতে ইমেইল লোড হতে দেরি না হয়)
   res.set("Content-Type", "image/gif");
   res.set("Cache-Control", "no-cache, no-store, must-revalidate");
   res.send(PIXEL);
 
-  // 🚨 Strict Bot Filtering
-  // গুগল ইমেজ প্রক্সিকে সরাসরি ব্লক করা যাবে না, কারণ জিমেইল ইউজাররাও এটি ব্যবহার করে।
-  // আমরা শুধু অন্যান্য স্পষ্ট স্প্যাম বটগুলোকে ব্লক করব।
-  const isStrictBot = /bot(?!googleimage)|crawler|spider|slurp/i.test(userAgent);
-  if (isStrictBot) {
-    console.log("Strict bot detected, skipped:", trackingId);
-    return;
-  }
+  // ২. Strict Bot Filter (স্পষ্ট স্প্যাম বটগুলোকে ব্লক করা)
+  const isStrictBot = /bot(?!googleimage)|crawler|spider|slurp|facebookexternalhit|dataprovider/i.test(userAgent);
+  if (isStrictBot) return;
 
   try {
-    // ডাটাবেস থেকে লগের স্ট্যাটাস এবং 'sent_at' (মেইল পাঠানোর সময়) আনা হলো
+    // ৩. ডাটাবেস থেকে বর্তমান লগের স্ট্যাটাস চেক করা
     const { data: existingLog } = await supabase
       .from("campaign_logs")
       .select("status, campaign_id, sent_at")
       .eq("tracking_id", trackingId)
       .single();
 
-    // যদি আগে থেকেই opened না থাকে, তবেই আমরা লজিক চালাব
+    // যদি লগটি আগে থেকেই 'opened' না থাকে, তবেই আমরা সামনে এগোব (Duplicate protection)
     if (existingLog && existingLog.status !== "opened") {
       
-      // 🚨 Smart Time-Based Bot Filter
-      const isGoogleProxy = /googleimageproxy/i.test(userAgent);
-
+      // ৪. Google Image Proxy (Auto-Cache) ফিল্টার 
+      // গুগল জিমেইল মেইল রিসিভ করার সাথে সাথেই (সাধারণত ১-১০ সেকেন্ডের মধ্যে) ছবি ক্যাশ করে। 
+      // আমরা ২০ সেকেন্ডের একটি সেফটি বাফার রাখছি। মেইল পাঠানোর ২০ সেকেন্ডের মধ্যে গুগলের রিকোয়েস্ট এলে সেটি ফেক ওপেন!
+      const isGoogleProxy = userAgent.includes("googleimageproxy");
+      
       if (isGoogleProxy && existingLog.sent_at) {
         const sentTime = new Date(existingLog.sent_at).getTime();
         const nowTime = new Date().getTime();
         const diffInSeconds = (nowTime - sentTime) / 1000;
 
-        // মেইল পাঠানোর ১৫ সেকেন্ডের মধ্যে গুগল স্ক্যান করলে সেটি ফেক ওপেন (বট)
-        if (diffInSeconds < 15) {
-          console.log("Ignored auto-prefetch by Google bot for:", trackingId);
-          return; // কাউন্ট না করে বের হয়ে যাবে
+        if (diffInSeconds < 20) {
+          console.log(`[Blocked] Auto-prefetch by Google Proxy for tracking ID: ${trackingId}`);
+          return; // এটি আসল ওপেন নয়, তাই কাউন্ট না করেই বের হয়ে যাবে
         }
       }
 
-      // আসল ওপেন হিসেবে ডাটাবেস আপডেট করা (স্ট্যাটাস 'opened' করা)
+      // ৫. ডাটাবেসে লগ 'opened' হিসেবে আপডেট করা
       const { error: logError } = await supabase
         .from("campaign_logs")
         .update({
@@ -65,22 +61,22 @@ app.get("/track/open/:trackingId", async (req, res) => {
         })
         .eq("tracking_id", trackingId);
 
-      // লগ আপডেট সফল হলে মেইন ক্যাম্পেইন টেবিলের কাউন্টার বাড়ানো
+      // ৬. মেইন Campaigns টেবিল আপডেট করা (The Ultimate Fix)
+      // এখানে শুধু total_opened কলামটিকেই আপডেট করা হচ্ছে, যা আপনার স্ক্রিনশটের সাথে ১০০% মিলে যায়।
       if (!logError && existingLog.campaign_id) {
         const campaignId = existingLog.campaign_id;
         
         const { data: campData } = await supabase
           .from("campaigns")
-          .select("total_opened, opens_count") 
+          .select("total_opened") 
           .eq("id", campaignId)
           .single();
         
-        const currentCount = campData?.total_opened || campData?.opens_count || 0;
-        const newCount = currentCount + 1;
+        const newCount = (campData?.total_opened || 0) + 1;
 
         await supabase
           .from("campaigns")
-          .update({ total_opened: newCount, opens_count: newCount }) 
+          .update({ total_opened: newCount }) 
           .eq("id", campaignId);
       }
     }
@@ -94,20 +90,17 @@ app.get("/unsubscribe/:email", async (req, res) => {
   const email = decodeURIComponent(req.params.email).trim().toLowerCase();
 
   try {
-    // Suppression list e add kora
     const { error: supError } = await supabase
       .from("suppression_list")
       .upsert({ email: email, reason: "user unsubscribed" });
 
     if (supError) throw supError;
 
-    // Contacts table e status 'suppressed' kora
     await supabase
       .from("contacts")
       .update({ status: "suppressed" })
       .eq("email", email);
 
-    // User ke success message dekhano
     res.status(200).send(`
       <html>
         <body style="font-family:sans-serif;text-align:center;padding:50px;background:#f9fafb;color:#111827;">
