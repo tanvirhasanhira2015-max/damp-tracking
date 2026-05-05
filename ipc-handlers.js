@@ -1,4 +1,4 @@
-﻿const { ipcMain, BrowserWindow, dialog } = require("electron");
+const { ipcMain, BrowserWindow, dialog } = require("electron");
 const { createClient } = require("@supabase/supabase-js");
 const { getAuthUrl, exchangeCodeForTokens, getGmailClient } = require("../../src/services/auth");
 const { importContactsFromFile } = require("../../src/services/contacts");
@@ -185,6 +185,7 @@ ipcMain.handle("create-campaign", async (_, data) => {
       account_id: data.accountId, status: "draft",
       audience_filter: JSON.stringify(data.audienceFilter || {}),
       daily_limit: data.dailyLimit || 100,
+      created_at: new Date().toISOString() // টাইমজোন ফিক্স করার জন্য যোগ করা হয়েছে
     });
     if (error) throw new Error(error.message);
     return { success: true, id };
@@ -231,10 +232,13 @@ ipcMain.handle("pause-campaign", async (_, id) => {
 // ── TEMPLATES ─────────────────────────────────────────────────
 ipcMain.handle("save-template", async (_, data) => {
   const id = data.id || uuidv4();
+  const now = new Date().toISOString(); // Pending ফিক্স করার জন্য সময় আনা হলো
+  
   if (data.id) {
-    await supabase.from("templates").update({ name: data.name, subject: data.subject, body: data.body, updated_at: new Date().toISOString() }).eq("id", id);
+    await supabase.from("templates").update({ name: data.name, subject: data.subject, body: data.body, updated_at: now }).eq("id", id);
   } else {
-    await supabase.from("templates").insert({ id, name: data.name, subject: data.subject, body: data.body });
+    // নতুন টেমপ্লেট তৈরির সময় created_at এবং updated_at দুটোই পাঠানো হচ্ছে
+    await supabase.from("templates").insert({ id, name: data.name, subject: data.subject, body: data.body, created_at: now, updated_at: now });
   }
   return { success: true, id };
 });
