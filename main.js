@@ -1,4 +1,4 @@
-﻿const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const path = require("path");
 const { createClient } = require("@supabase/supabase-js");
 const log = require("electron-log");
@@ -52,7 +52,7 @@ function createWindow() {
 
 app.on("ready", async () => {
   try {
-    const myName = "Tanvir"; // বন্ধুর জন্য Azmir লিখে দেবেন
+    const myName = "Azmir"; // বন্ধুর জন্য Azmir লিখে দেবেন
     const lockStatus = await claimAppLock(myName);
     if (!lockStatus.success) {
       dialog.showErrorBox("Access Denied", `${lockStatus.currentUser} বর্তমানে অ্যাপটি ব্যবহার করছেন।`);
